@@ -80,7 +80,17 @@ export function loadConfig(env = process.env, overrides = {}) {
   const explicitBotName = String(overrides.BOT_NAME ?? env.BOT_NAME ?? "").trim();
 
   return {
-    appId: pick("QQ_APP_ID", ""),
+    /** 协议：official（官方机器人 API，默认）/ onebot（QQ 小号 + NapCat/Lagrange） */
+  protocol: pick("QQ_PROTOCOL", "official"),
+  /** OneBot 正向 WS 地址，例：ws://127.0.0.1:3001 */
+  onebotWsUrl: pick("ONEBOT_WS_URL", ""),
+  /** OneBot HTTP 动作地址，例：http://127.0.0.1:3000 */
+  onebotHttpUrl: pick("ONEBOT_HTTP_URL", ""),
+  /** OneBot access_token（没设就不带） */
+  onebotToken: pick("ONEBOT_TOKEN", ""),
+  /** 机器人自己的 QQ 号，逗号分隔 */
+  onebotSelfIds: parseIdList(pick("ONEBOT_SELF_IDS", "")),
+  appId: pick("QQ_APP_ID", ""),
     clientSecret: pick("QQ_APP_SECRET", ""),
 
     /** 机器人自称（人格文件里的名字优先；这里是没有明确自我介绍时的兜底） */

@@ -17,6 +17,9 @@ import { loadConfig, parseDotenv, validateConfig, resolveApiBase, describeIntent
 import { createLogger } from "./util/log.js";
 import { QQApi } from "./qq/api.js";
 import { QQGateway } from "./qq/gateway.js";
+import { OneBotClient } from "./qq/onebot/client.js";
+import { OneBotApiAdapter } from "./qq/onebot/api-adapter.js";
+import { OneBotGateway } from "./qq/onebot/gateway.js";
 import { MessageEngine } from "./core/engine.js";
 import { ProactiveScheduler } from "./core/proactive.js";
 import { MockQQServer } from "./mock/server.js";
@@ -117,13 +120,35 @@ export async function bootstrap({ args, env, rootDir, logger }) {
   if (!config.botNameExplicit && persona.PERSONA_NAME) config.botName = persona.PERSONA_NAME;
   setBotName(config.botName);
 
-  const api = new QQApi({
-    appId: config.appId,
-    clientSecret: config.clientSecret,
-    apiBase: resolveApiBase(config),
-    tokenBase: config.tokenBase,
-    logger,
-  });
+  /**
+   * 2026-10-20：**协议可切换**。
+   *   QQ_PROTOCOL=official（默认）→ 官方机器人 API
+   *   QQ_PROTOCOL=onebot           → 用 QQ 小号登录，经 NapCat/Lagrange 走 OneBot v11
+   * 两者产出的 msg / api 接口完全一致，engine 与人格层不需要知道走的是哪套。
+   */
+  const protocol = String(config.protocol ?? "official").toLowerCase() === "onebot" ? "onebot" : "official";
+  logger.info(`协议：${protocol === "onebot" ? "OneBot v11（小号）" : "QQ 官方机器人 API"}`);
+
+  let onebotClient = null;
+  const api =
+    protocol === "onebot"
+      ? (() => {
+          onebotClient = new OneBotClient({
+            wsUrl: config.onebotWsUrl,
+            httpUrl: config.onebotHttpUrl,
+            token: config.onebotToken,
+            selfIds: config.onebotSelfIds,
+            logger,
+          });
+          return new OneBotApiAdapter({ client: onebotClient, logger });
+        })()
+      : new QQApi({
+          appId: config.appId,
+          clientSecret: config.clientSecret,
+          apiBase: resolveApiBase(config),
+          tokenBase: config.tokenBase,
+          logger,
+        });
 
   const generate = persona.createPersona({ config, logger });
   const engine = new MessageEngine({ config, api, generate, logger, persona });
@@ -159,7 +184,21 @@ export async function bootstrap({ args, env, rootDir, logger }) {
     logger.warn(`缺少关键订阅：${missing.join("、")} —— 相关场景将收不到消息`);
   }
 
-  const gateway = new QQGateway({
+  const gateway =
+    protocol === "onebot"
+      ? new OneBotGateway({
+          // 复用 api 适配器里那个 client —— 否则会开两条 WS、同一事件收两遍
+          client: onebotClient,
+          wsUrl: config.onebotWsUrl,
+          httpUrl: config.onebotHttpUrl,
+          token: config.onebotToken,
+          selfIds: config.onebotSelfIds,
+          onMessage: (msg) => engine.handle(msg),
+          onReady: () => {},
+          onError: () => {},
+          logger,
+        })
+      : new QQGateway({
     getAccessToken: () => api.getAccessToken(),
     getGatewayUrl: () => api.getGatewayUrl(),
     intents: config.intents,
