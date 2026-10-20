@@ -22,7 +22,6 @@ import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 
 import { fetchFileAsBuffer } from "./image.js";
-import { botName } from "../persona/naming.js";
 import {
   readImageSize,
   PROJECT_ROOT,
@@ -83,12 +82,19 @@ export function detectStickerSaveRequest(rawText, { hasPendingImage = false } = 
   const contextual =
     /把(?:这张|这个|那张|那个)?(?:图)?(?:记住|存|收)|记住这张|当(?:你的|我)?(?:的)?表情包|(?:这个|这张|那个|那张)[^。！？!?]{0,8}(?:以后|留着)[^。！？!?]{0,6}(?:用|发)|(?:以后|留着)[^。！？!?]{0,10}(?:就|再)(?:发|用)(?:这张|这个|它|这个表情|这张图)|(?:存|收|放|加|进|入)[^。！？!?]{0,6}表情库|表情库[^。！？!?]{0,6}(?:存|收|放|加)/;
 
-  const strong = direct.test(text);
+  // ⚠️ 2026-10-20 修：「收到」不是「把这张收起来」。
+  //   中文里「收到」= 我看到了，是最常见的应答词，几乎每句确认都会误触发存图。
+  //   「收到了吗」「你这边收到了」都会被 direct 正则里的 `收`+`到` 命中。
+  //   做法：判定前先把「收到」及其变体抹掉，再用剩下的文本跑正则。
+  const RECEIVED_NOISE = /收到(?:了|啦|吗|嘛|么|没|没有|过的)?|收到了|收着|收入|收益|收藏夹|收据/g;
+  const probe = text.replace(RECEIVED_NOISE, "");
+
+  const strong = direct.test(probe);
   if (strong) {
     const m = EXPLICIT_NAME_RE.exec(text);
     return { strong, name: sanitizeStickerName(m?.[1] ?? "") };
   }
-  if (contextual.test(text)) {
+  if (contextual.test(probe)) {
     const m = EXPLICIT_NAME_RE.exec(text);
     return { strong: false, name: sanitizeStickerName(m?.[1] ?? "") };
   }
@@ -100,7 +106,7 @@ export function detectStickerSaveRequest(rawText, { hasPendingImage = false } = 
   if (hasPendingImage) {
     const accepts =
       /(?:这个|这张|它|就这个|就这张)(?:也|就)?(?:行|可以|好|不错|要|收|算)|^(?:行|可以|好|要|收了|收)$|(?:无语|不想说话|烦|生气|被骚扰|有人说|有人问)[^。！？!?]{0,10}(?:就|的时候)?[^。！？!?]{0,6}(?:发|用)(?:这张|这个|它)/;
-    if (accepts.test(text)) {
+    if (accepts.test(probe)) {
       const m = EXPLICIT_NAME_RE.exec(text);
       return { strong: false, name: sanitizeStickerName(m?.[1] ?? ""), weakAccept: true };
     }
@@ -287,7 +293,7 @@ export async function saveStickerBuffer({ buf, caption = "", name = "", cfg, dep
     return {
       ok: false,
       code: "invalid_format",
-      message: "这不是" + botName() + "能存的图片（只认 jpg/png/webp/gif）。",
+      message: "这不是春禾能存的图片（只认 jpg/png/webp/gif）。",
     };
   }
 
@@ -301,7 +307,7 @@ export async function saveStickerBuffer({ buf, caption = "", name = "", cfg, dep
         return {
           ok: false,
           code: "moderated",
-          message: `这张${botName()}觉得不太合适${why ? `（${why}）` : ""}，先没放进表情库。`,
+          message: `这张春禾觉得不太合适${why ? `（${why}）` : ""}，先没放进表情库。`,
         };
       }
       reviewed = true;
@@ -329,7 +335,7 @@ export async function saveStickerBuffer({ buf, caption = "", name = "", cfg, dep
     return {
       ok: false,
       code: "limit",
-      message: `表情库已经到上限了（${maxCount} 张），主人先删几张，${botName()}再存。`,
+      message: `表情库已经到上限了（${maxCount} 张），主人先删几张，春禾再存。`,
     };
   }
 
@@ -363,7 +369,7 @@ export async function saveStickerBuffer({ buf, caption = "", name = "", cfg, dep
         name: dupName,
         file: e.file,
         bytes: e.buf.length,
-        message: `这张${botName()}库里已经有啦，叫「${dupName}」，就不重复存了。`,
+        message: `这张春禾库里已经有啦，叫「${dupName}」，就不重复存了。`,
       };
     }
   }
@@ -399,7 +405,7 @@ export async function saveStickerBuffer({ buf, caption = "", name = "", cfg, dep
         code: "too_large",
         message:
           `图有 ${formatBytes(buf.length)}，超过 ${formatBytes(cfg.maxBytes)} 上限，` +
-          "" + botName() + "这边也没法缩（没找到缩图工具），存不了。主人发张小一点的或者截一下？",
+          "春禾这边也没法缩（没找到缩图工具），存不了。主人发张小一点的或者截一下？",
       };
     } else {
       // 没缩成但体积没超：先存原图，别因为工具缺失就把主人的图拒之门外
@@ -437,7 +443,7 @@ export async function saveStickerBuffer({ buf, caption = "", name = "", cfg, dep
 
   const newSize = readImageSize(outBuf);
   const notes = [];
-  if (!reviewed) notes.push("" + botName() + "看不出内容合不合适");
+  if (!reviewed) notes.push("春禾看不出内容合不合适");
   if (resized) notes.push("原图太大已经缩到 128px");
   const note = notes.length ? `，${notes.join("，")}` : "";
   const message = `存下了，叫它「${finalName}」。（主人教的${note}）`;
