@@ -652,17 +652,39 @@ export class MessageEngine {
     //   · 主人说「这个群叫大群」→ 记住群名
     //   学到之后 #watchGroup 的说话人标签就用真名，减少认错人。
     if (msg.scope === "group" && msg.senderId) {
+      // 2026-10-20：**群主也要记名字**（原来只在非主人分支里学）；而且
+      // `author.username` 时给时不给，每个人都该在出现的那一刻被记住一次。
+      if (msg.senderName) {
+        this.names.learnMember(msg.senderId, msg.senderName, { groupOpenid: msg.groupOpenid });
+      }
+      // 活跃度统计：名字学不到时，"哪个群里都有谁"是唯一能推群名的线索
+      this.names.touchMember?.(msg.senderId, { groupOpenid: msg.groupOpenid });
+      this.names.touchGroup?.(msg.groupOpenid);
+
+      // ⭐ 从 @ 提名单里学名字（gateway 早就存了 `d.mentions`，引擎之前从没用过）
+      if (Array.isArray(msg.mentions)) {
+        for (const mn of msg.mentions) {
+          const mName = mn?.username ?? mn?.nick ?? "";
+          const mId = mn?.member_openid || mn?.id || "";
+          if (mId && mName) this.names.learnMember(mId, mName, { groupOpenid: msg.groupOpenid });
+        }
+      }
+
       if (!isOwnerUser) {
-        // ① 平台给的昵称 —— 有些群消息的 author 里**确实带 username**
-        //    （真机 2026-10-19 见过：群主那条是 "username":"某某"）。
-        //    有就直接学，名字比 openid 尾号好认一萬倍。
-        if (msg.senderName) this.names.learnMember(msg.senderId, msg.senderName);
-        // ② 自我介绍（「我是丙某」）作为补充
+        // 自我介绍（「我是某某」）作为补充
         const intro = detectSelfIntro(cleanText);
-        if (intro) this.names.learnMember(msg.senderId, intro);
+        if (intro) this.names.learnMember(msg.senderId, intro, { groupOpenid: msg.groupOpenid });
+        // 别人也可以给当前说话的人起名：「他叫阿杰」
+        const named = detectNamingIntent(cleanText);
+        if (named?.kind === "member-current") {
+          this.names.learnMember(msg.senderId, named.name, { groupOpenid: msg.groupOpenid });
+        }
       } else {
         const naming = detectNamingIntent(cleanText);
         if (naming?.kind === "group-current") this.names.learnGroup(msg.groupOpenid, naming.name);
+        if (naming?.kind === "member-current") {
+          this.names.learnMember(msg.senderId, naming.name, { groupOpenid: msg.groupOpenid });
+        }
       }
     }
 

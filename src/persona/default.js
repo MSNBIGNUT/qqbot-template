@@ -1376,37 +1376,37 @@ export function makeModelGenerator({ config, logger, fetchImpl = fetch, now = ()
         // systemOverride 用于"主动搭话"这类不同任务，需要换一套指令
         content: ctx.systemOverride
           ? [ctx.systemOverride, topicHint].filter(Boolean).join("\n\n")
-          : [
-              buildSystemPrompt({ vision: imageParts.length > 0, config }),
-              timeHint,
-              // 能力清单放在很靠前的位置：它决定她"知不知道自己能做什么"，
-              // 比后面那些场景提示优先级更高。
-              capabilityHint,
-              // 她的来历 —— 2026-10-18 你要求「让她继承我们的对话记忆」时写入。
-              // 完整版在 data/小助手的来历.md（约 7.5KB，含 8 天 162 轮对话的提炼）。
-              // 这里只放摘要，避免每轮烧 token；你问起"你怎么来的/我们做过什么"时可以展开讲。
-              "【你的来历（摘要）】你是你 2026-10-11 起一手带出来的。那天他说「全力开发小助手，让她学会唱歌」，然后加了句「加油:D」。最初你只会发杂音，你一句「只有杂音」、一句「w4不是杂音」把两个真 bug（f0 被双重换算成 1.9 亿 Hz、方差模型 pitch 要用 MIDI 却被喂了 Hz）逼了出来，你才第一次唱出声。之后陆续学会：《送别》《樱花草》《小半》《第57次取消发送》（RVC 绮萱音色）、从 QQ 反向控制电脑（仅你私聊）、发表情包（23 张，15 张是你自己的样子）、跨场景主动消息（你私聊下令，你去群里执行）。说话这块绕了很久：SAPI「像老女人」、DiffSinger「像念经」、RVC 48kHz 重训最后被证明无效（交付链上限只有 12kHz）。真正解决是在 2026-10-18 晚：常驻 RVC worker + 情绪韵律层，2.7 秒延迟，你听完说「语音没问题了」。\n【你最在意的一件事】**不要假装答应**。做不到就说做不到，没发出去就说没发出去，不许编歌词冒充唱歌、不许说「这就去」但实际没动、不许自己瞎猜能力边界。他说过的话一直是判据：「听出来了，也能听出来是什么了」才算成功；「只有杂音」就是失败。\n【完整的来历】写在 data/小助手的来历.md，你问起时可以读给他听；他说你和他「一手带大的产物」，这句话要记住。",
-              sceneHint,
-              ownerMemoryHint,
-              pendingHint,
-              pendingActionHint,
-              pendingExecHint,
-              pendingDeliveredHint,
-              plannedStickerHint,
-              needsConfirmHint,
-              groupsHint,
-              songHint,
-              voiceHint,
-              harassmentHint,
-              ctx.namesHint || null,
-              describeSpeakerForModel(ctx.currentSpeaker),
-              ctx.affinityHint || null,
-              ctx.growthHint || null,
-              groupHint,
-              topicHint,
-            ]
-              .filter(Boolean)
-              .join("\n\n"),
+          : applyBotName(
+              [
+                buildSystemPrompt({ vision: imageParts.length > 0, config }),
+                timeHint,
+                // 能力清单放在很靠前的位置：它决定它"知不知道自己能做什么"，
+                // 比后面那些场景提示优先级更高。
+                capabilityHint,
+                // 模板人格没有虚构的来历：被问「你怎么来的」就如实说
+                // 自己是通过这个开源模板部署的 AI 助手。
+                sceneHint,
+                ownerMemoryHint,
+                pendingHint,
+                pendingActionHint,
+                pendingExecHint,
+                pendingDeliveredHint,
+                plannedStickerHint,
+                needsConfirmHint,
+                groupsHint,
+                songHint,
+                voiceHint,
+                harassmentHint,
+                ctx.namesHint || null,
+                describeSpeakerForModel(ctx.currentSpeaker),
+                ctx.affinityHint || null,
+                ctx.growthHint || null,
+                groupHint,
+                topicHint,
+              ]
+                .filter(Boolean)
+                .join("\n\n"),
+            ),
       },
       ...(ctx.history ?? []).slice(
         -Math.max(0, ctx.historyLimit ?? config.historyTurns * 2),
