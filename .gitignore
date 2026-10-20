@@ -1,0 +1,55 @@
+# 凭证与运行数据一律不进版本库
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+credentials.json
+.secrets/
+
+# 依赖
+node_modules/
+
+# 运行期自动生成（只保留目录占位，见 data/README.md）
+data/*
+!data/.gitkeep
+
+# 角色素材：模板只保留目录结构，形象资产/表情包自己放
+assets/stickers/*.jpg
+assets/stickers/*.jpeg
+assets/stickers/*.png
+assets/stickers/*.gif
+assets/stickers/*.webp
+assets/stickers/*.bin
+# 角色参考图等第三方素材默认不随仓库分发
+assets/*.jpg
+assets/*.png
+assets/_sticker-src/
+assets/stickers/_raw/
+
+# 运行产物：合成的音频、临时乐谱、构建产物、快捷方式
+*.silk
+out_*.silk
+song_*.silk
+tmp_score_*.json
+scores/*_tmp.json
+*.exe
+*.lnk
+logs/
+*.log
+
+# 本地工具链（体积大且可重建）
+.voice-venv/
+.tools/
+build/
+tools/
+
+# 备份 / 临时工作目录：统一以 _ 开头
+_*
+!_fixtures/
+
+# 编辑器 / 系统杂项
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
