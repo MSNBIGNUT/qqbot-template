@@ -124,7 +124,7 @@ test("话题：文件损坏时降级为空，不阻塞启动", () => {
   fs.writeFileSync(file, "{ 不是 JSON", "utf8");
   const store = new TopicStore({ file });
   assert.equal(store.size, 0);
-  store.add({ text: "还能用吗", scope: "c2c", owner: "o1", shared: true });
+  store.add({ text: "我下个月要去日本玩", scope: "c2c", owner: "o1", shared: true });
   assert.equal(store.size, 1);
 });
 

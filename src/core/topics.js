@@ -64,10 +64,11 @@ export class TopicStore {
     this.topics.push(topic);
     // 超出上限：优先淘汰最旧且未被共享的
     if (this.topics.length > this.maxTopics) {
-      this.topics.sort((a, b) => {
-        if (a.shared !== b.shared) return a.shared ? 1 : -1;
-        return a.at - b.at;
-      });
+      // ⚠️ 2026-10-20：原来纯 FIFO（只按时间 + shared 优先）。
+      //   问题：一条说过 8 次的重要事，会被一次性的闲聊挤掉。
+      //   现在按**重要性**升序删，最不重要的先走。
+      const now = Date.now();
+      this.topics.sort((a, b) => topicImportance(a, now) - topicImportance(b, now));
       this.topics.splice(0, this.topics.length - this.maxTopics);
     }
     this._markDirty();
@@ -216,13 +217,60 @@ function isOwnedBy(topic, ownerIds = []) {
   return parts.some((p) => ownerIds.includes(p));
 }
 
-/** 清洗话题文本：去换行、去 @、截断 */export function normalizeTopic(text) {
+/**
+ * 这话题值不值得记？
+ *
+ * ⚠️ 2026-10-20 审计：200 条话题里 12% 是 ≤6 字碎片、22% 是问句结尾、
+ *   还混进了 `<faceType=…` 这种**表情包元数据**。这些东西挤占了有限的名额，
+ *   把真正重要的事挤掉了。所以入库前先过一道筛。
+ */
+export function isJunkTopic(text) {
+  const s = String(text ?? "").trim();
+  if (!s) return true;
+  // ① 太短：碎片，没有信息量（「了吗」「嗯」「好的」）
+  if (s.length <= 3) return true;
+  // ② 富媒体元数据：`<faceType=…>`、`<@…>`、`[图片]`、`[表情包]`
+  if (/^<|^\[(?:图片|表情包|语音|视频|文件)\]/.test(s)) return true;
+  if (/faceType=|faceId=|ext="|eyJ0ZXh0/i.test(s)) return true;
+  // ③ 纯语气/寒暄：整句只有这些字
+  if (/^[嗯哦啊吧呢吗嘛哈嘿唉呀哦噢额]+[。！？~～]*$/.test(s)) return true;
+  // ④ 纯问句且很短：「现在能唱歌吗」「在吗」—— 问完就没下文，不是话题
+  if (s.length <= 10 && /(?:吗|嘛|么|呢|咋|怎么|什么|谁|哪)\s*[？?]?\s*$/.test(s)) return true;
+  return false;
+}
+
+/** 清洗话题文本：去换行、去 @、截断；垃圾返回空串 */
+export function normalizeTopic(text) {
   const clean = String(text ?? "")
+    .replace(/<@!?[0-9A-Fa-f]{8,}>/g, "")
     .replace(/<@!?\d+>/g, "")
     .replace(/\s+/g, " ")
     .trim();
   if (!clean) return "";
+  if (isJunkTopic(clean)) return "";
   return clean.length > MAX_TOPIC_LEN ? `${clean.slice(0, MAX_TOPIC_LEN)}…` : clean;
+}
+
+/**
+ * 话题的「重要性」——**淘汰时按它升序删**，不再纯 FIFO。
+ *
+ * 组成：
+ *   · 被提起的次数（hits）：反复说的事才重要
+ *   · 信息量（长度）：太短的多半是碎嘴
+ *   · 是否含实体/时间/数字：具体的事比空泛的更值得留
+ *   · 时间衰减：越久没提起越容易被清
+ */
+export function topicImportance(t, now = Date.now()) {
+  const text = String(t?.text ?? "");
+  let score = 0;
+  score += Math.min(Number(t?.hits) || 1, 8) * 1.2;
+  score += Math.min(text.length, 60) / 20;
+  if (/(?:\d|月|日|号|点|元|年)/.test(text)) score += 0.6;
+  if (/(?:我叫|叫我|我的|生日|喜欢|讨厌|以后|记住|下次|明天|周[一二三四五六日])/.test(text)) score += 1.0;
+  if (t?.shared) score += 0.3;
+  const ageDays = Math.max(0, (now - (Number(t?.at) || now)) / 86400000);
+  score -= Math.min(ageDays * 0.15, 3);
+  return score;
 }
 
 /** 粗粒度分词：中文按字/双字，英文按单词。用于相关度排序，不做语义理解 */

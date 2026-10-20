@@ -39,6 +39,12 @@ const WHOLE_SENTENCE_PATTERNS = [
   /我(?:最|很|超|特别)?(?:喜欢|不喜欢|讨厌|害怕|希望|想要|爱吃|爱喝|爱看|爱听|最爱)/,
   /我的(?:生日|名字|昵称|外号|小名|手机号|电话|邮箱|地址|家乡|专业|工作|作息)(?:是|叫|在)/,
   /(?:以后|今后|下次|往后)(?:都|要|别|不要|不再|记得|必须|一定|先)/,
+  // ⚠️ 2026-10-20：「以后有人发垃圾话**就**用第三张图**怼**回去」——
+  //   动词是「就/用」，旧规则只认「都/要/别」，整条漏掉。
+  //   放宽成：以后…{0,24}(就|用|得|每|照|按)
+  /(?:以后|今后|从今往后|下次|往后)[^?？]{0,24}(?:就|用|得|每|照|按)/,
+  // 中性但长期有效的事实：我是谁 / 我在哪 / 我做什么 / 我有什么
+  /^我(?:是|叫|在|住|来自|做|学|读|玩|养|有|开|用)/,
   // 「以后每次在群里卖个萌」这类反复发生的事：不是一次性待办，而是长期规矩。
   /(?:以后|今后|从今往后|每次|天天|每天)[^?？]{0,16}(?:都|要|在群里|在群聊|别|不要)/,
   /(?:别忘了|别忘记|记住)/,
@@ -56,10 +62,26 @@ export function extractOwnerMemory(raw) {
   // 提问不记（"你记住我生日了吗" 不是要记的事）
   if (/[?？]\s*$/.test(text)) return null;
 
+  // ⚠️ 2026-10-20：**「记住了吗」这类确认问句不是记忆指令**。
+  //   真机：「我是闲人，你的主人，记住了吗」被抽成「了吗」——
+  //   MEMORY_CUE 匹配到「记住」，把后面的「了吗」当成了正文。
+  //   这种句子真正要记的是**前半句**，不是 "记住" 后面的东西。
+  if (/(?:记住|记着|记下|记得|别忘了?)/.test(text) && /(?:吗|嘛|么|呢)\s*[？?]?\s*$/.test(text)) {
+    // 去掉尾巴，把前面的正文当事实
+    const body = text.replace(/[，,、\s]*(?:你)?(?:记住|记着|记下|别忘了?)[^，,。！!]*$/, "");
+    const cleaned = normalizeOwnerMemoryText(body);
+    if (cleaned.length >= 4) return { text: cleaned, kind: "fact" };
+    return null;
+  }
+
   const cue = text.match(MEMORY_CUE);
   if (cue) {
     const body = normalizeOwnerMemoryText(cue[1]);
-    if (body.length >= 2) return { text: body, kind: "instruction" };
+    // 「记住」后面必须真的有个能记的东西：≥4 字，且不是纯语气词
+    if (body.length >= 4 && !/^(?:了|啦|吧|吗|嘛|么|哦|嗯|的|呀)+$/.test(body)) {
+      return { text: body, kind: "instruction" };
+    }
+    // 太短/纯语气词 → 退回"整句"判断（前面还有 WHOLE_SENTENCE_PATTERNS 兜着）
   }
 
   if (WHOLE_SENTENCE_PATTERNS.some((re) => re.test(text))) {

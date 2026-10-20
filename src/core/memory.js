@@ -101,7 +101,46 @@ export function annotateEntry(entry) {
   //   场景标注的用途是"别把私聊内容拿去群聊说"，那只和**主人说了什么**有关；
   //   她自己在哪说的并不需要标（当前场景在提示词里另有说明）。
   if (entry?.role === "assistant") return entry;
-  return { role: entry.role, content: `〔${label}〕${entry.content}`, scene: entry.scene };
+
+  // 2026-10-20：再带上**相对时间**。模型看到〔私聊·3天前〕才知道那是旧事，
+  // 不会把上周的约定当成刚刚说的。老记忆没有 `at` 就只标场景，不瞎编时间。
+  const when = relativeTimeLabel(entry?.at);
+  const tag = when ? `〔${label}·${when}〕` : `〔${label}〕`;
+  return { role: entry.role, content: `${tag}${entry.content}`, scene: entry.scene, at: entry.at };
+}
+
+/**
+ * 时间戳 → 人话：「今天」「昨天」「3 天前」「10月16日」
+ * 为的是让模型**感知时间流逝**，不是精确到秒。
+ */
+export function relativeTimeLabel(at, now = Date.now()) {
+  const ts = Number(at);
+  if (!Number.isFinite(ts) || ts <= 0) return "";
+  const diff = now - ts;
+  if (diff < 0) return "刚刚";
+  // ⚠️ 设计取舍：**当天内的记忆不加时间后缀**。
+  //   原因：`〔私聊〕` 这个标记模型看了几个月，是稳定契约；每条都改成
+  //   `〔私聊·3 小时前〕` 会让它跟着模仿、也增加噪音。真正需要区分的是
+  //   「昨天/上周说的」——所以只有跨天才加后缀。
+  const d0 = new Date(ts);
+  const t0 = new Date(now);
+  const sameCalendarDay =
+    d0.getFullYear() === t0.getFullYear() &&
+    d0.getMonth() === t0.getMonth() &&
+    d0.getDate() === t0.getDate();
+  if (sameCalendarDay) return "";
+  const d = d0;
+  const yesterday = new Date(now - 86400000);
+  if (
+    d.getFullYear() === yesterday.getFullYear() &&
+    d.getMonth() === yesterday.getMonth() &&
+    d.getDate() === yesterday.getDate()
+  ) {
+    return "昨天";
+  }
+  const days = Math.floor(diff / 86400000);
+  if (days <= 6) return `${days} 天前`;
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
 /** 旧会话键（c2c:x / group:g:x）→ 主人统一键 owner:x 时的来源判定 */
@@ -202,7 +241,15 @@ export class MemoryStore {
   append(sessionKey, userText, assistantText, meta = {}) {
     const arr = this.sessions.get(sessionKey) ?? [];
     const scene = meta?.scene && String(sessionKey).startsWith("owner:") ? meta.scene : "";
-    const entry = (role, content) => (scene ? { role, content, scene } : { role, content });
+    // 2026-10-20：**每条记忆都带时间戳**（原来只有 role/content）。
+    // 没有时间，模型分不清「昨天说的」和「三周前说的」——所有记忆在她眼里是同时发生的。
+    const now = this.now ? this.now() : Date.now();
+    const entry = (role, content) => ({
+      role,
+      content,
+      at: now,
+      ...(scene ? { scene } : {}),
+    });
     arr.push(entry("user", userText));
     arr.push(entry("assistant", assistantText));
 

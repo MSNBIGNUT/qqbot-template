@@ -3448,9 +3448,9 @@ export class MessageEngine {
     //   这里再做一道确定性兜底：**发出去之前**把句首的这类标注去掉。
     const stripSceneLabels = (s) =>
       String(s ?? "")
-        .replace(/^\s*〔\s*(?:私聊|群聊)\s*〕\s*/g, "")
-        .replace(/^\s*[（(]\s*(?:私聊|群聊)\s*[）)]\s*/g, "")
-        .replace(/^\s*\[\s*(?:私聊|群聊)\s*\]\s*/g, "");
+        .replace(/^\s*〔\s*(?:私聊|群聊)(?:\s*·\s*[^〕]*)?\s*〕\s*/g, "")
+        .replace(/^\s*[（(]\s*(?:私聊|群聊)(?:\s*·\s*[^）)]*)?\s*[）)]\s*/g, "")
+        .replace(/^\s*\[\s*(?:私聊|群聊)(?:\s*·\s*[^\]]*)?\s*\]\s*/g, "");
 
     let sendText = stripSceneLabels(text);
     if (msg.scope === "group" && msg.memberMap) {

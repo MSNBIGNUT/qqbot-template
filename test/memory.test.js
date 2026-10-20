@@ -26,8 +26,13 @@ test("记忆：一问一答成对保存，可读回", () => {
   m.append("c2c:u1", "你好", "主人好～");
   const h = m.get("c2c:u1");
   assert.equal(h.length, 2);
-  assert.deepEqual(h[0], { role: "user", content: "你好" });
-  assert.deepEqual(h[1], { role: "assistant", content: "主人好～" });
+  // 2026-10-20：每条记忆现在多带一个 `at` 时间戳（让她知道"这是几天前说的"）。
+  assert.equal(h[0].role, "user");
+  assert.equal(h[0].content, "你好");
+  assert.equal(h[1].role, "assistant");
+  assert.equal(h[1].content, "主人好～");
+  assert.ok(Number.isFinite(h[0].at) && h[0].at > 0, "用户消息要带时间戳");
+  assert.equal(h[0].at, h[1].at, "同一问一答应共用一个时间戳");
 });
 
 test("记忆：超出轮数上限时淘汰最旧的", () => {
