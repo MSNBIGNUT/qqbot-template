@@ -31,6 +31,16 @@
 
 import { fetchImageAsDataUrl, fetchFileAsBuffer } from "../media/image.js";
 import { resolveImageGenConfig, buildToolList, executeToolCall } from "../media/imagegen.js";
+
+import {
+  WEB_TOOLS,
+  WEB_SEARCH_TOOL_NAME,
+  WEB_FETCH_TOOL_NAME,
+  searchWeb,
+  fetchPage,
+  formatSearchForModel,
+  formatFetchForModel,
+} from "../media/web-tools.js";
 import {
   SEND_GROUP_TOOL_NAME,
   buildSendGroupTool,
@@ -1441,6 +1451,12 @@ export function makeModelGenerator({ config, logger, fetchImpl = fetch, now = ()
           });
     const tools = buildToolList(imageCfg);
 
+    // 2026-10-20：**联网查阅**。主人要求「开发联网查阅功能」。
+    // 搜索走必应 CN 的 HTML 解析（这台机器实测可用），抓网页走通用 HTTP。
+    // 关掉开关就不注册 —— 和「没 key 不注册画图工具」同一个原则。
+    const webEnabled = config.webToolsEnabled !== false;
+    if (webEnabled) tools.push(...WEB_TOOLS);
+
     // 表情包：素材目录空或功能关掉时不注册（同「没 key 不注册画图工具」的原则）
     const stickerCfg =
       config.stickers && typeof config.stickers === "object" && "enabled" in config.stickers
@@ -1534,8 +1550,38 @@ export function makeModelGenerator({ config, logger, fetchImpl = fetch, now = ()
         const fnName = call?.function?.name;
         // 按工具名分发。表情包与画图走的是同一条发送链路：
         // 都把 images 交回去，由上层的富媒体接口统一发出去。
+        // 联网工具：直接 await 真实结果，失败就把原因原样回填给她
+        let webResult = null;
+        if (fnName === WEB_SEARCH_TOOL_NAME || fnName === WEB_FETCH_TOOL_NAME) {
+          let args = {};
+          try {
+            args = JSON.parse(call?.function?.arguments || "{}");
+          } catch {
+            args = {};
+          }
+          if (fnName === WEB_SEARCH_TOOL_NAME) {
+            const r = await searchWeb(args?.query, {
+              limit: Math.min(Math.max(Number(args?.limit) || 5, 1), 10),
+            });
+            logger?.info?.(
+              r.ok ? `联网搜索「${r.query}」→ ${r.results.length} 条` : `联网搜索失败：${r.reason}`,
+            );
+            webResult = { ok: r.ok, content: formatSearchForModel(r) };
+          } else {
+            const r = await fetchPage(args?.url, {
+              maxChars: Math.min(Math.max(Number(args?.max_chars) || 6000, 500), 20000),
+            });
+            logger?.info?.(
+              r.ok ? `抓网页 ${r.url} → ${r.text.length} 字` : `抓网页失败：${r.reason}`,
+            );
+            webResult = { ok: r.ok, content: formatFetchForModel(r) };
+          }
+        }
+
         const result =
-          fnName === STAY_SILENT_TOOL_NAME
+          webResult
+            ? webResult
+            : fnName === STAY_SILENT_TOOL_NAME
             ? (() => {
                 ctx.staySilent = true;
                 logger?.info?.(`决定不回复（${String(call?.function?.arguments ?? "").slice(0, 60)}）`);

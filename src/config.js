@@ -263,6 +263,8 @@ export function loadConfig(env = process.env, overrides = {}) {
     modelMaxTokens: num("MODEL_MAX_TOKENS", 800),
     /** 陌生人的初始好感度（默认 0）；主人恒定最高，不受影响 */
     affinityDefault: num("QQ_AFFINITY_DEFAULT", 0),
+    /** 联网查阅（web_search / web_fetch）总开关 */
+    webToolsEnabled: pick("WEB_TOOLS_ENABLED", "true") !== "false",
     modelTemperature: num("MODEL_TEMPERATURE", 0.9),
     /** 关闭真实模型，使用本地规则回复（无 key 时自动如此） */
     personaMode: pick("PERSONA_MODE", "auto"),
