@@ -90,6 +90,15 @@ test("人格：解析内置 id、相对路径与裸名字", () => {
   assert.equal(listPersonas({ rootDir: root }).some((p) => p.id === "default"), true);
 });
 
+test("人格：换自称后，画图的自指判定跟着 BOT_NAME 走", async () => {
+  const { isSelfPortraitRequest, stripSelfMentions } = await import("../src/media/imagegen.js");
+  setBotName("团子");
+  assert.equal(isSelfPortraitRequest("画个团子的样子"), true, "新名字应被识别为自画像");
+  assert.equal(isSelfPortraitRequest("画座雪山"), false);
+  assert.equal(stripSelfMentions("画面里有一个团子，在雪山前"), "画面里有一个，在雪山前");
+  resetBotName();
+});
+
 test("人格：自称注册表默认春禾，可设置与还原", () => {
   resetBotName();
   assert.equal(botName(), "春禾");

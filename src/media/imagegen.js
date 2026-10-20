@@ -109,6 +109,22 @@ export const SELF_PORTRAIT_PATTERNS = [
 ];
 
 /**
+ * 把正则里的「春禾」换成当前人格的自称（BOT_NAME）。
+ *
+ * 换人格后模型可能会用新名字指代自己（「画个小助手」），
+ * 这些判定必须跟着名字走，否则会漏判成"非自画像"。
+ */
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function withPersonaName(re) {
+  const name = str(botName()) || "春禾";
+  if (name === "春禾") return re;
+  return new RegExp(re.source.split("春禾").join(escapeRe(name)), re.flags);
+}
+
+/**
  * 主人这句话是不是明确要画春禾？
  *
  * @param {string} text 主人这一轮的原话（不要传模型写的 prompt）
@@ -118,8 +134,9 @@ export function isSelfPortraitRequest(text) {
   const s = str(text);
   if (!s) return false;
 
+  const name = str(botName()) || "春禾";
   // 「画你」「画一张你」「画个春禾」：你/春禾 直接是宾语
-  const m = /画[一下张个幅副只]?\s*(?:你|春禾)/.exec(s);
+  const m = new RegExp(`画[一下张个幅副只]?\\s*(?:你|${escapeRe(name)})`).exec(s);
   if (m) {
     const rest = s.slice(m.index + m[0].length);
     if (!rest.startsWith("的")) return true;
@@ -127,7 +144,7 @@ export function isSelfPortraitRequest(text) {
     return /^的(?:样子|形象|自拍|立绘|肖像|照片|模样|长相|背影|侧脸|全身|半身|脸|眼睛|头发)/.test(rest);
   }
 
-  return SELF_PORTRAIT_PATTERNS.some((re) => re.test(s));
+  return SELF_PORTRAIT_PATTERNS.some((re) => withPersonaName(re).test(s));
 }
 
 /**
@@ -142,8 +159,17 @@ export const SELF_MENTION_RE = /(?:春禾|我自己的(?:形象|样子)|我的(?
 export function stripSelfMentions(text) {
   const s = str(text);
   if (!s) return "";
+  const name = str(botName()) || "春禾";
+  // 换人格后模型会写新名字，不能只剥「春禾」
+  const selfRe =
+    name === "春禾"
+      ? SELF_MENTION_RE
+      : new RegExp(
+          `(?:${escapeRe(name)}|我自己的(?:形象|样子)|我的(?:形象|样子)|你自己|我自己)`,
+          "g",
+        );
   return s
-    .replace(SELF_MENTION_RE, "")
+    .replace(selfRe, "")
     .replace(/[（(]\s*[)）]/g, "")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/^[，、,。.；;：:\s]+/, "")
