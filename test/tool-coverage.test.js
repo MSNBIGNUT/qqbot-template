@@ -36,6 +36,7 @@ const ALL_ON = {
   pendingActions: true,
   groupTrigger: 'wake',
   webToolsEnabled: true,
+  fileToolsEnabled: true,
   ttsAllowGroup: 'on-demand',
 }
 
@@ -50,6 +51,11 @@ const TOOL_TO_CAPABILITY = [
   { tool: STAY_SILENT_TOOL_NAME, keywords: ['不回复', '沉默', '不用回'], configFlag: null },
   { tool: WEB_SEARCH_TOOL_NAME, keywords: ['联网查阅'], configFlag: 'webToolsEnabled' },
   { tool: WEB_FETCH_TOOL_NAME, keywords: ['联网查阅'], configFlag: 'webToolsEnabled' },
+  // 2026-10-20：文件工具（仅主人 + 仅私聊）
+  { tool: 'list_dir', keywords: ['读写文件'], configFlag: 'fileToolsEnabled' },
+  { tool: 'read_file', keywords: ['读写文件'], configFlag: 'fileToolsEnabled' },
+  { tool: 'write_file', keywords: ['读写文件'], configFlag: 'fileToolsEnabled' },
+  { tool: 'search_files', keywords: ['读写文件'], configFlag: 'fileToolsEnabled' },
 ]
 
 test('工具覆盖：每个注册给模型的工具，能力清单里都得说她知道', () => {
@@ -78,7 +84,7 @@ test('工具覆盖：源码里出现的工具名常量，都能在能力清单�
       if (e.isDirectory()) walk(p)
       else if (e.name.endsWith('.js')) {
         const src = fs.readFileSync(p, 'utf8')
-        for (const m of src.matchAll(/export const (\w+_TOOL_NAME)\s*=\s*["'`]([a-z_]+)["'`]/g)) {
+        for (const m of src.matchAll(/export const (\w+_TOOL(?:_NAME)?)\s*=\s*["'`]([a-z_]+)["'`]/g)) {
           names.add(m[2])
         }
       }

@@ -42,6 +42,14 @@ import {
   formatFetchForModel,
 } from "../media/web-tools.js";
 import {
+  FILE_TOOLS,
+  FILE_LIST_TOOL,
+  FILE_READ_TOOL,
+  FILE_WRITE_TOOL,
+  FILE_SEARCH_TOOL,
+  executeFileTool,
+} from "../media/file-tools.js";
+import {
   SEND_GROUP_TOOL_NAME,
   buildSendGroupTool,
   executeSendGroupCall,
@@ -880,6 +888,15 @@ export function describeCapabilitiesForModel(config, extras = {}) {
       : "· **画图**：现在没配密钥或已关闭——要如实说画不了。",
   );
 
+  // 文件工具（2026-10-20）
+  lines.push(
+    on(config.fileToolsEnabled)
+      ? '· **读写文件**（仅主人私聊）：能列目录、读文本文件、写文件、在目录里搜内容。' +
+          '范围限制在指定根目录内，越界一律拒绝。**读到什么就说什么，不要假装看过；' +
+          '写失败要说原因，绝不许假装写了**。'
+      : '· **读写文件**：现在关着。',
+  );
+
   // 「这条可以不回」（2026-10-20 补：stay_silent 工具一直在，但清单没写，
   //   等于她不知道自己有沉默权，只会每条都接）
   lines.push(
@@ -1479,6 +1496,15 @@ export function makeModelGenerator({ config, logger, fetchImpl = fetch, now = ()
     const webEnabled = config.webToolsEnabled !== false;
     if (webEnabled) tools.push(...WEB_TOOLS);
 
+    // 2026-10-20：**文件工具**（列目录/读/写/搜内容）。
+    // 只给主人、且只在私聊 —— 群里任何人拿不到（和 remote-agent 同一条线）。
+    // 路径被限制在 config.fileToolsRoot 以内，越界一律拒绝。
+    const fileToolsOn =
+      config.fileToolsEnabled !== false &&
+      ctx?.currentSpeaker?.isOwner === true &&
+      ctx?.scope === "c2c";
+    if (fileToolsOn) tools.push(...FILE_TOOLS);
+
     // 表情包：素材目录空或功能关掉时不注册（同「没 key 不注册画图工具」的原则）
     const stickerCfg =
       config.stickers && typeof config.stickers === "object" && "enabled" in config.stickers
@@ -1572,6 +1598,24 @@ export function makeModelGenerator({ config, logger, fetchImpl = fetch, now = ()
         const fnName = call?.function?.name;
         // 按工具名分发。表情包与画图走的是同一条发送链路：
         // 都把 images 交回去，由上层的富媒体接口统一发出去。
+        // 文件工具（主人私聊）：同样 await 真实结果
+        let fileResult = null;
+        if (
+          fileToolsOn &&
+          [FILE_LIST_TOOL, FILE_READ_TOOL, FILE_WRITE_TOOL, FILE_SEARCH_TOOL].includes(fnName)
+        ) {
+          let fargs = {};
+          try {
+            fargs = JSON.parse(call?.function?.arguments || "{}");
+          } catch {
+            fargs = {};
+          }
+          fileResult = await executeFileTool(fnName, fargs, {
+            rootDir: config.fileToolsRoot,
+          });
+          logger?.info?.(`文件工具 ${fnName}（${fileResult.ok ? "成功" : "失败"}）`);
+        }
+
         // 联网工具：直接 await 真实结果，失败就把原因原样回填给她
         let webResult = null;
         if (fnName === WEB_SEARCH_TOOL_NAME || fnName === WEB_FETCH_TOOL_NAME) {
@@ -1601,9 +1645,11 @@ export function makeModelGenerator({ config, logger, fetchImpl = fetch, now = ()
         }
 
         const result =
-          webResult
-            ? webResult
-            : fnName === STAY_SILENT_TOOL_NAME
+          fileResult
+            ? fileResult
+            : webResult
+              ? webResult
+              : fnName === STAY_SILENT_TOOL_NAME
             ? (() => {
                 ctx.staySilent = true;
                 logger?.info?.(`决定不回复（${String(call?.function?.arguments ?? "").slice(0, 60)}）`);
