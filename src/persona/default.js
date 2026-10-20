@@ -676,9 +676,13 @@ export function describeGroupContextForModel(lines) {
 /** 把你长期记忆拼成给模型看的一段附注 */
 export function describeOwnerMemoryForModel(facts) {
   if (!Array.isArray(facts) || facts.length === 0) return "";
+  // 2026-10-20：跳过**已被新事实覆盖**的旧条目（「叫我小明」→「叫我阿明」之后，
+  // 前者虽然还留在文件里，但绝不能再进提示词，否则模型会遇到两个互相矛盾的称呼）。
+  const live = facts.filter((f) => f && !f.superseded);
+  if (live.length === 0) return "";
   return [
     "【关于你的长期记忆】以下是你亲口让你记住的事（偏好/称呼/以后要怎么做的指令），私聊和群里都有效：",
-    ...facts.slice(-20).map((f) => `- ${f.text}`),
+    ...live.slice(-20).map((f) => `- ${f.text}`),
     "和当前对话相关时自然用上（例如用他指定的称呼）；无关就别硬提，更不要编造没说过的事。",
   ].join("\n");
 }
@@ -1403,6 +1407,8 @@ export function makeModelGenerator({ config, logger, fetchImpl = fetch, now = ()
                 ctx.growthHint || null,
                 groupHint,
                 topicHint,
+                // 2026-10-20：更早对话的压缩摘要（系统侧）
+                ctx.memorySummary || null,
               ]
                 .filter(Boolean)
                 .join("\n\n"),

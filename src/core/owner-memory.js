@@ -51,6 +51,26 @@ const WHOLE_SENTENCE_PATTERNS = [
 ];
 
 /**
+ * 这条长期记忆属于哪一类。
+ *
+ * 用途：**冲突消解**。单值类别（称呼/生日/住址）一个人只可能有一个答案，
+ * 所以新的一定覆盖旧的 —— 不然「叫我小明」和后来的「叫我阿明」会同时在，
+ * 模型不知道该听谁的。多值类别（喜好/规矩）允许多条并存。
+ */
+export function factCategory(text) {
+  const s = String(text ?? '')
+  if (/(?:叫我|喊我|称呼我|名字|昵称|小名|外号)/.test(s)) return '称呼'
+  if (/生日/.test(s)) return '生日'
+  if (/(?:住|家在|来自|搬到)/.test(s)) return '住址'
+  if (/(?:喜欢|讨厌|爱吃|爱喝|爱看|爱听|害怕)/.test(s)) return '喜好'
+  if (/(?:以后|今后|下次|往后|每次)/.test(s)) return '规矩'
+  return '其他'
+}
+
+/** 只有这些类别是"一个人只可能有一个答案"的 */
+const SINGLE_VALUED = new Set(['称呼', '生日', '住址'])
+
+/**
  * 从主人说的话里抽一条长期记忆。
  *
  * @param {string} raw
@@ -119,8 +139,20 @@ export class OwnerMemoryStore {
     const got = extractOwnerMemory(text);
     if (!got) return null;
 
+    const category = factCategory(got.text)
+
+    // 冲突消解：单值类别的新事实**覆盖**旧的（旧标记 superseded，不再注入提示词）
+    if (SINGLE_VALUED.has(category)) {
+      for (const f of this.facts) {
+        if (factCategory(f.text) !== category) continue
+        if (f.text === got.text) continue
+        f.superseded = true
+        this.logger?.info?.('长期记忆被覆盖：' + f.text.slice(0, 24) + ' → ' + got.text.slice(0, 24))
+      }
+    }
+
     const existing = this.facts.find(
-      (f) => f.text === got.text || f.text.includes(got.text) || got.text.includes(f.text),
+      (f) => !f.superseded && (f.text === got.text || f.text.includes(got.text) || got.text.includes(f.text)),
     );
     if (existing) {
       existing.at = Date.now();
@@ -198,6 +230,8 @@ export class OwnerMemoryStore {
           scene: String(f.scene ?? ""),
           at: Number(f.at) || Date.now(),
           hits: Number(f.hits) || 1,
+          // 保留「已被覆盖」标记：重启之后旧的仍然不该出现在提示词里
+          ...(f.superseded ? { superseded: true } : {}),
         }))
         .slice(-this.maxFacts);
       this.logger?.info?.(`已加载 ${this.facts.length} 条主人的长期记忆`);

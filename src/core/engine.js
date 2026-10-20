@@ -1049,6 +1049,29 @@ export class MessageEngine {
     const crossScene =
       isOwnerUser && history.some((m) => m.scene && m.scene !== msg.scope);
 
+    // 2026-10-20：更早对话的压缩摘要（系统侧），不塞进对话历史
+    let memorySummary = this.memory.getSummary?.(sessionKey) ?? "";
+
+    // 2026-10-20：**回忆指代召回**。用户说「上次说的那个游戏」「之前那个事」时，
+    // 从话题库按关键词捞回最相关的几条 —— 否则她只能回"我不记得了"。
+    // 只在真的出现指代词时才查，避免每轮都往上下文里塞东西。
+    const RECALL_CUE =
+      /(?:上次|上回|之前|前些天|前几天|以前说过|那个事|那件事|还记得|记不记得|说过的那|我跟你说的)/;
+    if (RECALL_CUE.test(cleanText) && this.topics?.search) {
+      try {
+        const hits = this.topics.search(cleanText, { limit: 3 });
+        if (hits.length) {
+          const recall =
+            '〔他说「上次/之前」，下面是从记忆里找到的相关内容〕\n' +
+            hits.map((h) => '- ' + h.text).join('\n');
+          memorySummary = [memorySummary, recall].filter(Boolean).join('\n\n');
+          this.logger?.debug?.('回忆召回：命中 ' + hits.length + ' 条话题');
+        }
+      } catch (err) {
+        this.logger?.warn?.('回忆召回失败（不影响回复）：' + (err?.message ?? err));
+      }
+    }
+
     // 待办列表给模型看，但**排除正在执行的这一条**（它由 pendingAction 单独说明），
     // 且非主人一律为空数组——这是隐私边界，不是可选优化。
     const pendingForCtx = isOwnerUser
@@ -1067,6 +1090,8 @@ export class MessageEngine {
       messageId: msg.messageId,
       sessionKey,
       history,
+      /** 更早对话的压缩摘要（系统侧）；从没溢出过就是空串 */
+      memorySummary,
       /** 模型最多读多少条历史（owner 40 条 / 其他人 16 条） */
       historyLimit: isOwnerUser
         ? Math.max(0, Number(this.config.ownerHistoryTurns) * 2)

@@ -177,6 +177,8 @@ export class MemoryStore {
 
     /** @type {Map<string, Array<{role:string, content:string, scene?:string}>>} */
     this.sessions = new Map();
+    /** sessionKey → { lines: string[], turns: number, at: number }（被挤掉的对话压缩保留） */
+    this.summaries = new Map();
     /** 已做过「旧 owner 会话 → owner:<id>」合并的主人 id（幂等标记，随文件持久化） */
     this.ownerMerged = new Set();
     this._saveTimer = null;
@@ -254,10 +256,79 @@ export class MemoryStore {
     arr.push(entry("assistant", assistantText));
 
     const maxMessages = this.#maxMessagesFor(sessionKey);
-    while (arr.length > maxMessages) arr.shift();
+    // ⚠️ 2026-10-20：**丢掉之前先摘要**。
+    //   原来是 `while (arr.length > max) arr.shift()` —— 聊 100 轮前 80 轮直接蒸发。
+    //   现在把被挤掉的那些压成一条摘要留下：信息不会凭空消失，只是变短了。
+    const dropped = [];
+    while (arr.length > maxMessages) {
+      const u = arr.shift();
+      if (u) dropped.push(u);
+      const a = arr.shift();
+      if (a) dropped.push(a);
+    }
+    if (dropped.length) this.#absorbSummary(sessionKey, dropped);
 
     this.sessions.set(sessionKey, arr);
     this._scheduleSave();
+  }
+
+  /**
+   * 把挤出去的对话压成摘要。
+   *
+   * 用**规则**而不是再调一次模型：摘要必须零延迟、零成本、可测试，
+   * 而且这一步发生在每轮回复的关键路径上。挑"有信息量"的句子留下：
+   * 决定/约定/命名/偏好/带数字的，丢掉寒暄和答应。
+   */
+  #absorbSummary(sessionKey, dropped) {
+    const prev = this.summaries.get(sessionKey) ?? { lines: [], turns: 0, at: 0 };
+    const lines = [...prev.lines];
+
+    const KEEP =
+      /(?:以后|记住|决定|定了|改成|换成|约定|规则|不要|别忘|必须|名字叫|叫我|生日|喜欢|讨厌|住|在.{2,8}(?:工作|上学|读书)|下个?月|明年|下周|周末|计划|打算|\d{1,2}\s*[月点号日]|\d{3,}|第[一二三四五六七八九十\d]+)/;
+    // 纯寒暄/附和：就算够长也没有信息量
+    const CHITCHAT =
+      /^(?:嗯|哦|好|行|在吗|哈哈|嘿嘿|呵呵|好的|收到|谢谢|晚安|早安|可以|没问题|知道了|随便|聊聊|你说呢)[。！？~～…\s]*$/;
+
+    for (const e of dropped) {
+      const text = String(e?.content ?? "").trim();
+      if (!text || text.length < 4) continue;
+      if (CHITCHAT.test(text)) continue;
+      // 她的回话只在"像结论"时留（「好，那就这么定」这种没有信息，跳过）
+      if (e?.role === "assistant" && !KEEP.test(text)) continue;
+      // 用户说的话：命中关键词 或 够长且有实质（≥8 字且不是寒暄）就留
+      if (e?.role === "user" && !KEEP.test(text)) {
+        if (text.length < 8) continue;
+      }
+      if (e?.role !== "user" && !KEEP.test(text)) continue;
+      if (lines.some((l) => l.includes(text.slice(0, 12)))) continue; // 去重
+      lines.push(text.length > 80 ? `${text.slice(0, 80)}…` : text);
+    }
+
+    // 摘要本身也要有上限：留最近 12 条、总量 900 字
+    const trimmed = lines.slice(-12);
+    let total = 0;
+    const finalLines = [];
+    for (let i = trimmed.length - 1; i >= 0; i -= 1) {
+      total += trimmed[i].length;
+      if (total > 900) break;
+      finalLines.unshift(trimmed[i]);
+    }
+
+    this.summaries.set(sessionKey, {
+      lines: finalLines,
+      turns: prev.turns + Math.floor(dropped.length / 2),
+      at: this.now ? this.now() : Date.now(),
+    });
+  }
+
+  /**
+   * 这个会话"更早的对话"摘要。没溢出过就返回空串。
+   * 引擎把它当**系统侧上下文**注入，不塞进对话历史——避免模型以为这是用户刚说的。
+   */
+  getSummary(sessionKey) {
+    const s = this.summaries.get(sessionKey);
+    if (!s?.lines?.length) return "";
+    return `〔更早的对话（已压缩，共约 ${s.turns} 轮）〕\n${s.lines.map((l) => `· ${l}`).join("\n")}`;
   }
 
   /**
@@ -412,6 +483,8 @@ export class MemoryStore {
         savedAt: new Date().toISOString(),
         ownerMerged: [...this.ownerMerged],
         sessions: Object.fromEntries(this.sessions),
+      // 摘要也存下来：重启后"更早的对话"不能丢
+      summaries: Object.fromEntries(this.summaries),
       };
       // 原子写：先写临时文件再改名，避免半截文件
       const tmp = `${this.file}.tmp`;
@@ -430,6 +503,16 @@ export class MemoryStore {
       const raw = fs.readFileSync(this.file, "utf8");
       const data = JSON.parse(raw);
       const sessions = data?.sessions ?? {};
+    // 读回摘要（老文件没有这个字段，正常）
+    for (const [k, v] of Object.entries(data?.summaries ?? {})) {
+      const lines = Array.isArray(v?.lines) ? v.lines.filter((x) => typeof x === "string") : [];
+      if (!lines.length) continue;
+      this.summaries.set(String(k), {
+        lines,
+        turns: Number(v?.turns) || 0,
+        at: Number(v?.at) || 0,
+      });
+    }
       for (const id of Array.isArray(data?.ownerMerged) ? data.ownerMerged : []) {
         if (id) this.ownerMerged.add(String(id));
       }

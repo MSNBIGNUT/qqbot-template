@@ -190,6 +190,34 @@ export class TopicStore {
       this.topics = [];
     }
   }
+
+  /**
+   * 按关键词**找回**相关话题（2026-10-20）。
+   *
+   * 用途：用户说「上次说的那个游戏」「之前那个事」这类**回忆指代**时，
+   * 从话题库里捞出最相关的几条塞进上下文 —— 否则她只能说"我不记得了"。
+   *
+   * 纯倒排式匹配（tokenize 双字切分），不依赖 embedding，零外部依赖。
+   */
+  search(query, { limit = 3, minScore = 3, sharedOnly = true } = {}) {
+    const tokens = tokenize(query)
+    if (!tokens.size) return []
+    const now = Date.now()
+    const out = []
+    for (const t of this.topics) {
+      if (sharedOnly && !t.shared) continue
+      const tt = tokenize(t.text)
+      let overlap = 0
+      for (const tok of tokens) if (tt.has(tok)) overlap += 1
+      if (!overlap) continue
+      const score =
+        overlap * 3 +
+        Math.min(Number(t.hits) || 1, 5) * 0.3 +
+        Math.max(0, 2 - (now - (Number(t.at) || now)) / 86400000)
+      if (score >= minScore) out.push({ text: t.text, score })
+    }
+    return out.sort((a, b) => b.score - a.score).slice(0, limit)
+  }
 }
 
 /**
