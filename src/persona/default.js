@@ -49,6 +49,7 @@ import {
   FILE_SEARCH_TOOL,
   executeFileTool,
 } from "../media/file-tools.js";
+import { TODO_TOOL, TODO_TOOL_NAME, executeTodoTool } from "../core/todos.js";
 import {
   SEND_GROUP_TOOL_NAME,
   buildSendGroupTool,
@@ -897,6 +898,15 @@ export function describeCapabilitiesForModel(config, extras = {}) {
       : '· **读写文件**：现在关着。',
   );
 
+  // 待办清单（2026-10-20）
+  lines.push(
+    on(config.todosEnabled)
+      ? '· **待办清单**（仅主人私聊）：多步任务时你能自己维护一份清单，' +
+          '记住做到第几步、还剩几件。一两步就能做完的事不要建清单。' +
+          '**清单是你自己的工作记录，不要在回复里念给主人听**，只说进度。'
+      : '· **待办清单**：现在关着。',
+  );
+
   // 「这条可以不回」（2026-10-20 补：stay_silent 工具一直在，但清单没写，
   //   等于她不知道自己有沉默权，只会每条都接）
   lines.push(
@@ -1458,6 +1468,8 @@ export function makeModelGenerator({ config, logger, fetchImpl = fetch, now = ()
                 topicHint,
                 // 2026-10-20：更早对话的压缩摘要（系统侧）
                 ctx.memorySummary || null,
+              // 2026-10-20：当前待办清单（多步任务的进度）
+              ctx.todoHint || null,
               ]
                 .filter(Boolean)
                 .join("\n\n"),
@@ -1504,6 +1516,11 @@ export function makeModelGenerator({ config, logger, fetchImpl = fetch, now = ()
       ctx?.currentSpeaker?.isOwner === true &&
       ctx?.scope === "c2c";
     if (fileToolsOn) tools.push(...FILE_TOOLS);
+
+    // 2026-10-20：**待办清单**。多步任务时她需要记住做到哪了。
+    // 同样只给主人私聊 —— 这是她自己的工作记录，不对外。
+    const todoOn = config.todosEnabled !== false && fileToolsOn;
+    if (todoOn) tools.push(TODO_TOOL);
 
     // 表情包：素材目录空或功能关掉时不注册（同「没 key 不注册画图工具」的原则）
     const stickerCfg =
@@ -1598,6 +1615,19 @@ export function makeModelGenerator({ config, logger, fetchImpl = fetch, now = ()
         const fnName = call?.function?.name;
         // 按工具名分发。表情包与画图走的是同一条发送链路：
         // 都把 images 交回去，由上层的富媒体接口统一发出去。
+        // 待办清单（主人私聊）
+        let todoResult = null;
+        if (todoOn && fnName === TODO_TOOL_NAME) {
+          let targs = {};
+          try {
+            targs = JSON.parse(call?.function?.arguments || "{}");
+          } catch {
+            targs = {};
+          }
+          todoResult = executeTodoTool(ctx.todoStore, ctx.todoOwnerId, targs);
+          logger?.info?.(`待办更新（${todoResult.ok ? "成功" : "失败"}）`);
+        }
+
         // 文件工具（主人私聊）：同样 await 真实结果
         let fileResult = null;
         if (
@@ -1645,11 +1675,13 @@ export function makeModelGenerator({ config, logger, fetchImpl = fetch, now = ()
         }
 
         const result =
-          fileResult
-            ? fileResult
-            : webResult
-              ? webResult
-              : fnName === STAY_SILENT_TOOL_NAME
+          todoResult
+            ? todoResult
+            : fileResult
+              ? fileResult
+              : webResult
+                ? webResult
+                : fnName === STAY_SILENT_TOOL_NAME
             ? (() => {
                 ctx.staySilent = true;
                 logger?.info?.(`决定不回复（${String(call?.function?.arguments ?? "").slice(0, 60)}）`);

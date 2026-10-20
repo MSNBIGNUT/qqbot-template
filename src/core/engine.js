@@ -12,6 +12,7 @@
  */
 
 import { nextMsgSeq, VOICE_FILE_TYPE, IMAGE_FILE_TYPE } from "../qq/api.js";
+import { TodoStore } from "./todos.js";
 import path from "node:path";
 import { DedupeCache, RateLimiter, AccessPolicy } from "./access.js";
 import { MemoryStore } from "./memory.js";
@@ -288,10 +289,20 @@ export class MessageEngine {
 
     /** 会话记忆（可持久化到磁盘，重启后仍记得之前聊过什么） */
     this.memory = new MemoryStore({
+
       maxTurns: config.historyTurns,
       // 主人跨私聊/群聊共用一份记忆，窗口单独放大；其他人的 token 成本不变。
       ownerMaxTurns: config.ownerHistoryTurns,
       file: config.memoryFile,
+      logger,
+    });
+
+    /**
+     * 多步任务的待办清单（2026-10-20）。
+     * 按 owner 分开存：她自己的工作记录，别人看不到。
+     */
+    this.todos = new TodoStore({
+      file: config.todoFile ?? "data/todos.json",
       logger,
     });
 
@@ -1092,6 +1103,11 @@ export class MessageEngine {
       history,
       /** 更早对话的压缩摘要（系统侧）；从没溢出过就是空串 */
       memorySummary,
+      /** 待办清单（她自己的多步任务记录）；没建过就是空串 */
+      todoHint: this.todos?.describe?.(msg.senderId) ?? "",
+      /** 写待办用：谁的清单 */
+      todoOwnerId: msg.senderId,
+      todoStore: this.todos,
       /** 模型最多读多少条历史（owner 40 条 / 其他人 16 条） */
       historyLimit: isOwnerUser
         ? Math.max(0, Number(this.config.ownerHistoryTurns) * 2)

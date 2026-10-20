@@ -269,6 +269,9 @@ export function loadConfig(env = process.env, overrides = {}) {
     fileToolsEnabled: pick("FILE_TOOLS_ENABLED", "true") !== "false",
     /** 文件工具能碰的根目录；越界一律拒绝 */
     fileToolsRoot: pick("FILE_TOOLS_ROOT", "C:/大肥鱼的小宝库"),
+    /** 待办清单（多步任务跟踪）—— 仅主人 + 仅私聊 */
+    todosEnabled: pick("TODOS_ENABLED", "true") !== "false",
+    todoFile: pick("QQ_TODO_FILE", "data/todos.json"),
     modelTemperature: num("MODEL_TEMPERATURE", 0.9),
     /** 关闭真实模型，使用本地规则回复（无 key 时自动如此） */
     personaMode: pick("PERSONA_MODE", "auto"),

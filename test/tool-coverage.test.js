@@ -37,6 +37,7 @@ const ALL_ON = {
   groupTrigger: 'wake',
   webToolsEnabled: true,
   fileToolsEnabled: true,
+  todosEnabled: true,
   ttsAllowGroup: 'on-demand',
 }
 
@@ -56,6 +57,8 @@ const TOOL_TO_CAPABILITY = [
   { tool: 'read_file', keywords: ['读写文件'], configFlag: 'fileToolsEnabled' },
   { tool: 'write_file', keywords: ['读写文件'], configFlag: 'fileToolsEnabled' },
   { tool: 'search_files', keywords: ['读写文件'], configFlag: 'fileToolsEnabled' },
+  // 待办清单（仅主人 + 仅私聊）
+  { tool: 'todo_write', keywords: ['待办清单'], configFlag: 'todosEnabled' },
 ]
 
 test('工具覆盖：每个注册给模型的工具，能力清单里都得说她知道', () => {
