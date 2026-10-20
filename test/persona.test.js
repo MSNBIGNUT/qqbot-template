@@ -90,6 +90,18 @@ test("人格：解析内置 id、相对路径与裸名字", () => {
   assert.equal(listPersonas({ rootDir: root }).some((p) => p.id === "default"), true);
 });
 
+test("人格：BOT_NAME 能覆盖本地规则兜底文案里的名字", async () => {
+  clearPersonaCache();
+  setBotName("团子");
+  const mod = await loadPersona("default");
+  const generate = mod.createPersona({ config: {}, logger: null });
+  const out = await generate({ text: "你是谁", history: [], scope: "c2c" });
+  assert.equal(typeof out, "string");
+  assert.match(out, /团子/);
+  assert.doesNotMatch(out, /小助手/);
+  resetBotName();
+});
+
 test("人格：换自称后，画图的自指判定跟着 BOT_NAME 走", async () => {
   const { isSelfPortraitRequest, stripSelfMentions } = await import("../src/media/imagegen.js");
   setBotName("团子");

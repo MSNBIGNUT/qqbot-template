@@ -45,6 +45,7 @@ import {
 } from "../media/stickers.js";
 
 import { extractFile, formatForModel, guessExt } from "../media/extract/index.js";
+import { botName } from "./naming.js";
 import {
   isVoiceCapabilityQuestion,
   describeVoiceCapabilityAnswer,
@@ -1608,10 +1609,22 @@ export function makeModelGenerator({ config, logger, fetchImpl = fetch, now = ()
  * 组装人格层。
  * mode: "local" 强制本地 / "model" 强制模型 / "auto" 有 key 用模型，否则本地。
  */
+/** 本地兜底文案里写的是「小助手」；BOT_NAME 设了别的名字就统一替换 */
+function applyBotName(text) {
+  const name = String(botName() ?? "").trim();
+  if (!name || name === "小助手" || typeof text !== "string") return text;
+  return text.split("小助手").join(name);
+}
+
+/** 给生成器套一层「换名字」：模型/本地兜底的输出都会过一遍 */
+function withBotName(generate) {
+  return async (ctx) => applyBotName(await generate(ctx));
+}
+
 export function createPersona({ config, logger, fetchImpl }) {
   // 本地规则生成器本身没有视觉能力（它不做网络请求、也看不懂像素），
   // 所以这里恒传 false —— 必须诚实，不能因为配置开了视觉就让本地模式假装能看图。
-  const local = makeLocalGenerator({ logger, vision: false });
+  const local = withBotName(makeLocalGenerator({ logger, vision: false }));
   const wantModel =
     config.personaMode === "model" ||
     (config.personaMode === "auto" && config.modelBaseUrl && config.modelApiKey);
